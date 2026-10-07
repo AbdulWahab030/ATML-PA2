@@ -64,13 +64,28 @@ def prepare_dpo_run(config_path: str, dataset_path: str | None = None, beta: flo
         rows = rows[: int(max_examples)]
 
     tokenizer = load_tokenizer(cfg["base_model"])
+    max_length = int(cfg["max_sequence_length"])
+    filtered_rows = []
+    skipped = 0
+    for row in rows:
+        prompt = prompt_messages_from_preference(row)
+        try:
+            encode_prompt_response(tokenizer, prompt, preference_responses(row)[0], max_length)
+            encode_prompt_response(tokenizer, prompt, preference_responses(row)[1], max_length)
+            filtered_rows.append(row)
+        except ValueError:
+            skipped += 1
+
+    if skipped:
+        print(f"Filtered {skipped}/{len(rows)} DPO rows because the prompt or response exceeds max_sequence_length={max_length}.")
+
     model = load_policy(cfg, trainable=True, fresh_lora=True)
     ref_model = load_policy(cfg, trainable=False, fresh_lora=False)
     loader = DataLoader(
-        rows,
+        filtered_rows,
         batch_size=int(cfg["batch_size"]),
         shuffle=True,
-        collate_fn=make_collate(tokenizer, int(cfg["max_sequence_length"])),
+        collate_fn=make_collate(tokenizer, max_length),
     )
     optimizer = AdamW(
         trainable_parameters(model),
@@ -79,7 +94,7 @@ def prepare_dpo_run(config_path: str, dataset_path: str | None = None, beta: flo
     )
     return {
         "cfg": cfg,
-        "rows": rows,
+        "rows": filtered_rows,
         "tokenizer": tokenizer,
         "model": model,
         "ref_model": ref_model,
