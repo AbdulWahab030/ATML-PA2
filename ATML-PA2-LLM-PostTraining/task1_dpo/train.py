@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import json
-from pathlib import Path
 
 import torch
 import torch.nn.functional as F
@@ -45,14 +43,16 @@ def sequence_logprob(model, batch, device):
         attention_mask=attention_mask,
         use_cache=False,
     ).logits
-    log_probs = F.log_softmax(logits, dim=-1)
+    log_probs = F.log_softmax(logits.float(), dim=-1)
     target_ids = input_ids[:, 1:]
     shift_log_probs = log_probs[:, :-1, :]
-    token_log_probs = torch.gather(shift_log_probs, dim=-1, index=target_ids.unsqueeze(-1)).squeeze(-1)
+    token_log_probs = torch.gather(
+        shift_log_probs,
+        dim=-1,
+        index=target_ids.unsqueeze(-1),
+    ).squeeze(-1)
     token_mask = response_mask[:, 1:]
-    seq_log_probs = (token_log_probs * token_mask).sum(dim=-1)
-    denom = token_mask.sum(dim=-1).clamp_min(1)
-    return seq_log_probs / denom
+    return (token_log_probs * token_mask).sum(dim=-1)
 
 
 def prepare_dpo_run(config_path: str, dataset_path: str | None = None, beta: float | None = None, max_examples: int | None = None):
@@ -79,8 +79,13 @@ def prepare_dpo_run(config_path: str, dataset_path: str | None = None, beta: flo
     if skipped:
         print(f"Filtered {skipped}/{len(rows)} DPO rows because the prompt or response exceeds max_sequence_length={max_length}.")
 
+    if not filtered_rows:
+        raise ValueError(
+            f"No DPO rows fit max_sequence_length={max_length}; "
+            "increase the configured sequence length or inspect the training data."
+        )
+
     model = load_policy(cfg, trainable=True, fresh_lora=True)
-    ref_model = load_policy(cfg, trainable=False, fresh_lora=False)
     loader = DataLoader(
         filtered_rows,
         batch_size=int(cfg["batch_size"]),
@@ -97,7 +102,6 @@ def prepare_dpo_run(config_path: str, dataset_path: str | None = None, beta: flo
         "rows": filtered_rows,
         "tokenizer": tokenizer,
         "model": model,
-        "ref_model": ref_model,
         "loader": loader,
         "optimizer": optimizer,
         "beta": float(cfg["beta"] if beta is None else beta),
@@ -108,33 +112,29 @@ def run_training(config_path: str, run_name: str, dataset_path: str | None = Non
     bundle = prepare_dpo_run(config_path, dataset_path, beta, max_examples)
     cfg = bundle["cfg"]
     model = bundle["model"]
-    ref_model = bundle["ref_model"]
     loader = bundle["loader"]
     optimizer = bundle["optimizer"]
     device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
     model.to(device)
-    ref_model.to(device)
 
     output = repo_path(output_path or cfg["standard_output"])
     output.parent.mkdir(parents=True, exist_ok=True)
 
     epochs = int(cfg["epochs"])
     grad_accum_steps = int(cfg.get("grad_accum_steps", 1))
-    global_step = 0
 
     for epoch in range(1, epochs + 1):
         model.train()
-        ref_model.eval()
         running_loss = 0.0
         running_acc = 0.0
         batches = 0
+        optimizer.zero_grad(set_to_none=True)
 
         for step, (chosen_batch, rejected_batch) in enumerate(loader, start=1):
-            optimizer.zero_grad(set_to_none=True)
-
             with torch.no_grad():
-                ref_chosen = sequence_logprob(ref_model, chosen_batch, device)
-                ref_rejected = sequence_logprob(ref_model, rejected_batch, device)
+                with reference_mode(model):
+                    ref_chosen = sequence_logprob(model, chosen_batch, device)
+                    ref_rejected = sequence_logprob(model, rejected_batch, device)
 
             policy_chosen = sequence_logprob(model, chosen_batch, device)
             policy_rejected = sequence_logprob(model, rejected_batch, device)
@@ -146,17 +146,19 @@ def run_training(config_path: str, run_name: str, dataset_path: str | None = Non
                 ref_rejected,
                 bundle["beta"],
             )
-            loss = loss / grad_accum_steps
             loss.backward()
-            running_loss += float(loss.detach().item()) * grad_accum_steps
+            running_loss += float(loss.detach().item())
             running_acc += float(metrics["preference_accuracy"].item())
             batches += 1
 
             if step % grad_accum_steps == 0 or step == len(loader):
+                accumulated_batches = min(grad_accum_steps, step % grad_accum_steps or grad_accum_steps)
+                for parameter in trainable_parameters(model):
+                    if parameter.grad is not None:
+                        parameter.grad.div_(accumulated_batches)
                 torch.nn.utils.clip_grad_norm_(trainable_parameters(model), max_norm=float(cfg.get("max_grad_norm", 1.0)))
                 optimizer.step()
                 optimizer.zero_grad(set_to_none=True)
-                global_step += 1
 
         epoch_loss = running_loss / max(1, batches)
         epoch_acc = running_acc / max(1, batches)
