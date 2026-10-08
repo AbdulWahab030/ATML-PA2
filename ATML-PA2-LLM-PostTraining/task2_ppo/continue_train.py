@@ -161,11 +161,11 @@ def run_ppo(
             do_sample=bool(generation_cfg.get("do_sample", True)),
         )
 
-        sequences = generated["sequences"]
-        attention_mask = generated["attention_mask"]
+        sequences = generated["sequences"].clone().detach()
+        attention_mask = generated["attention_mask"].clone().detach()
         prompt_width = generated["prompt_width"]
-        response_ids = generated["response_ids"]
-        response_mask = generated["response_mask"].to(device)
+        response_ids = generated["response_ids"].clone().detach()
+        response_mask = generated["response_mask"].clone().detach().to(device)
         responses = generated["responses"]
         terminated = generated["terminated_with_eos"]
 
@@ -184,18 +184,20 @@ def run_ppo(
                 task_rewards[b] -= missing_eos_penalty
 
         # 4. Compute rollout log-probs and reference log-probs
-        with torch.inference_mode():
+        with torch.no_grad():
             old_logp, _ = response_token_logprobs(
                 policy, sequences, attention_mask, prompt_width, response_ids
             )
+            old_logp = old_logp.clone().detach()
             with reference_mode(policy):
                 ref_logp, _ = response_token_logprobs(
                     policy, sequences, attention_mask, prompt_width, response_ids
                 )
+            ref_logp = ref_logp.clone().detach()
 
             # 5. Compute old values from value model
             val = token_values(value_model, sequences, attention_mask)[:, prompt_width - 1 : -1]
-            old_values = val[:, : response_ids.shape[1]]
+            old_values = val[:, : response_ids.shape[1]].clone().detach()
 
             # 6. Compute shaped rewards, GAE advantages, and empirical returns
             shaped_rew = shaped_rewards(
@@ -204,7 +206,8 @@ def run_ppo(
             advantages, returns = compute_gae(
                 shaped_rew, old_values, response_mask, gamma=gamma, lam=gae_lambda
             )
-            norm_adv = normalize_advantages(advantages, response_mask)
+            norm_adv = normalize_advantages(advantages, response_mask).clone().detach()
+            returns = returns.clone().detach()
 
         # 7. PPO update passes
         policy_loss_epoch = 0.0
