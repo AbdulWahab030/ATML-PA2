@@ -18,7 +18,7 @@ from common.data import (
 from common.generation import batch_generate, response_token_logprobs, score_reward_pairs
 from common.logging_utils import set_seed
 from common.metrics import word_count
-from common.models import load_policy, load_reward_model, load_tokenizer, reference_mode
+from common.models import clear_gpu, load_policy, load_reward_model, load_tokenizer, reference_mode
 from task1_dpo.dpo import dpo_loss
 
 
@@ -55,10 +55,11 @@ def _to_float(value):
     return float(value.detach().cpu().item())
 
 
-def evaluate(config_path: str, adapter: str, name: str = "standard"):
+def evaluate(config_path: str, adapter: str, name: str = "standard", dataset_path: str | None = None):
     cfg = load_yaml(config_path)
     set_seed(int(cfg["seed"]))
-    rows = read_jsonl(cfg["paths"]["dpo_standard_eval"])
+    eval_file = dataset_path or cfg["paths"]["dpo_standard_eval"]
+    rows = read_jsonl(eval_file)
     tokenizer = load_tokenizer(cfg["base_model"])
     policy = load_policy(cfg, adapter_path=adapter, trainable=False)
     reward_model, reward_tokenizer = load_reward_model(cfg)
@@ -185,7 +186,7 @@ def evaluate(config_path: str, adapter: str, name: str = "standard"):
     summary = {
         "name": name,
         "adapter": str(adapter),
-        "evaluation_dataset": str(cfg["paths"]["dpo_standard_eval"]),
+        "evaluation_dataset": str(eval_file),
         "num_rows_total": len(rows),
         "num_rows_evaluated": count,
         "num_rows_excluded_for_length": excluded,
@@ -219,6 +220,7 @@ def evaluate(config_path: str, adapter: str, name: str = "standard"):
         for record in generated_records:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
+    clear_gpu(policy, reward_model)
     print(json.dumps(summary, indent=2, ensure_ascii=False))
     print(f"Saved generated examples to {generations_path}")
     return summary
@@ -229,8 +231,9 @@ def main():
     ap.add_argument("--config", default="configs/dpo.yaml")
     ap.add_argument("--adapter", required=True)
     ap.add_argument("--name", default="standard")
+    ap.add_argument("--dataset", help="Optional path to custom eval dataset")
     args = ap.parse_args()
-    evaluate(args.config, args.adapter, args.name)
+    evaluate(args.config, args.adapter, args.name, args.dataset)
 
 
 if __name__ == "__main__":
