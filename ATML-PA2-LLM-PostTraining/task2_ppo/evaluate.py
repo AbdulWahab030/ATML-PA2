@@ -1,6 +1,29 @@
+"""task2_ppo/evaluate.py — Held-out evaluation for a trained PPO policy adapter.
+
+Entry-point command (run from the repository root)::
+
+    python -m task2_ppo.evaluate --config configs/ppo.yaml \\
+        --adapter outputs/task2_ppo/standard --name standard
+
+Computes and saves:
+  * Reward model scores (mean, std) on held-out eval prompts.
+  * Sampled per-token KL divergence from the frozen reference.
+  * Response length statistics (tokens mean/min/max, word count mean).
+  * Truncation count.
+  * A JSONL file of generated text samples (one per eval prompt).
+  * A JSON summary of all numeric metrics.
+
+Cross-platform notes
+--------------------------
+Device is selected dynamically (CUDA → MPS → CPU).  ``torch.autocast``
+is applied to reward-model inference.  ``clear_gpu`` handles both CUDA
+and MPS cache clearing.
+"""
+
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 from pathlib import Path
 
@@ -13,21 +36,64 @@ from common.metrics import word_count
 from common.models import clear_gpu, load_policy, load_reward_model, load_tokenizer, reference_mode
 
 
+# ---------------------------------------------------------------------------
+# Cross-platform helpers
+# ---------------------------------------------------------------------------
+
+def _detect_device() -> torch.device:
+    """Return the best available compute device."""
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
+
+
+@contextlib.contextmanager
+def _inference_autocast(device: torch.device):
+    """Context manager for mixed-precision inference (no-op on CPU)."""
+    if device.type in {"cuda", "mps"}:
+        try:
+            with torch.autocast(device_type=device.type, enabled=True):
+                yield
+            return
+        except RuntimeError:
+            pass
+    with contextlib.nullcontext():
+        yield
+
+
+# ---------------------------------------------------------------------------
+# Evaluation
+# ---------------------------------------------------------------------------
+
 def evaluate(
     config_path: str,
     adapter: str,
     name: str = "standard",
     dataset_path: str | None = None,
-):
+) -> dict:
     """Evaluate a trained PPO policy adapter on held-out evaluation prompts.
 
-    Computes held-out reward model scores, sampled per-token KL divergence
-    from the frozen reference model, policy entropy, response length statistics,
-    and saves machine-readable summary logs and generated text samples.
+    Generates one response per eval prompt, scores every response with the
+    frozen reward model, and computes sampled KL divergence relative to the
+    reference policy embedded in the LoRA adapter.  All results are written
+    to ``results/task2_ppo/`` as JSON and JSONL.
+
+    Args:
+        config_path:  Path to ``configs/ppo.yaml``.
+        adapter:      Path to the LoRA adapter directory to evaluate.
+        name:         Run identifier used as a prefix for output file names.
+        dataset_path: Optional override for the eval prompt JSONL file.
+
+    Returns:
+        Summary dict with all numeric metrics and file-path references.
     """
     cfg = load_yaml(config_path)
     set_seed(int(cfg.get("seed", 6304)))
-    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+
+    device = _detect_device()
+    print(f"[device] Using: {device}")
 
     eval_file = dataset_path or cfg["paths"]["rl_prompt_eval"]
     rows = read_jsonl(eval_file)
@@ -38,24 +104,25 @@ def evaluate(
 
     max_prompt_length = int(cfg.get("max_prompt_length", 256))
     max_new_tokens = int(cfg.get("eval_max_response_length", 768))
+    reward_max_length = int(cfg.get("reward_max_length", 1280))
     batch_size = int(cfg.get("eval_batch_size", 2))
     generation_cfg = cfg.get("generation", {})
 
     generation_prompts = [prompt_messages(row) for row in rows]
-    generated_records = []
+    generated_records: list[dict] = []
     sampled_kl_token_sum = 0.0
     sampled_kl_token_count = 0
-    reward_scores = []
-    response_lengths = []
-    response_words = []
+    reward_scores: list[float] = []
+    response_lengths: list[int] = []
+    response_words: list[int] = []
     truncated_count = 0
 
     print(f"=== Evaluating PPO Policy: {name} ({adapter}) ===")
-    print(f"Evaluating on {len(rows)} prompts with eval_max_response_length={max_new_tokens}...")
+    print(f"Evaluating on {len(rows)} prompts with eval_max_response_length={max_new_tokens}…")
 
     for start in range(0, len(rows), batch_size):
-        batch_rows = rows[start : start + batch_size]
-        prompts = generation_prompts[start : start + batch_size]
+        batch_rows = rows[start: start + batch_size]
+        prompts = generation_prompts[start: start + batch_size]
 
         generated = batch_generate(
             policy,
@@ -89,17 +156,18 @@ def evaluate(
         sampled_kl_token_sum += float(((policy_logp - ref_logp) * mask).sum().cpu())
         sampled_kl_token_count += int(mask.sum().cpu())
 
-        scores = score_reward_pairs(
-            reward_model,
-            reward_tokenizer,
-            prompts,
-            generated["responses"],
-            max_length=int(cfg.get("reward_max_length", 1280)),
-        )
-        batch_scores = [float(score) for score in scores.detach().cpu().tolist()]
+        with _inference_autocast(device):
+            scores = score_reward_pairs(
+                reward_model,
+                reward_tokenizer,
+                prompts,
+                generated["responses"],
+                max_length=reward_max_length,
+            )
+        batch_scores = [float(s) for s in scores.detach().cpu().tolist()]
         reward_scores.extend(batch_scores)
         response_lengths.extend(int(n) for n in generated["response_lengths"])
-        response_words.extend(word_count(text) for text in generated["responses"])
+        response_words.extend(word_count(t) for t in generated["responses"])
         truncated_count += sum(generated["truncated"])
 
         for offset, (row, prompt, response) in enumerate(
@@ -128,7 +196,8 @@ def evaluate(
             if reward_scores else None
         ),
         "sampled_policy_reference_kl_per_token": (
-            sampled_kl_token_sum / sampled_kl_token_count if sampled_kl_token_count else None
+            sampled_kl_token_sum / sampled_kl_token_count
+            if sampled_kl_token_count else None
         ),
         "response_tokens_mean": sum(response_lengths) / max(1, count),
         "response_tokens_min": min(response_lengths) if response_lengths else 0,
@@ -145,23 +214,32 @@ def evaluate(
     summary["generations_file"] = str(generations_path)
 
     summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
-    with generations_path.open("w", encoding="utf-8") as f:
+    with generations_path.open("w", encoding="utf-8") as fh:
         for record in generated_records:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     clear_gpu(policy, reward_model)
     print(json.dumps(summary, indent=2, ensure_ascii=False))
-    print(f"Saved evaluation metrics to {summary_path}")
-    print(f"Saved generated samples to {generations_path}")
+    print(f"Saved evaluation metrics → {summary_path}")
+    print(f"Saved generated samples  → {generations_path}")
     return summary
 
 
-def main():
-    ap = argparse.ArgumentParser(description="Evaluate PPO policy adapter.")
-    ap.add_argument("--config", default="configs/ppo.yaml")
-    ap.add_argument("--adapter", required=True)
-    ap.add_argument("--name", default="standard")
-    ap.add_argument("--dataset", help="Optional path to custom eval dataset")
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+def main() -> None:
+    """Command-line entry-point for PPO policy evaluation."""
+    ap = argparse.ArgumentParser(description="Evaluate a PPO policy adapter on held-out prompts.")
+    ap.add_argument("--config", default="configs/ppo.yaml",
+                    help="Path to the task PPO config.")
+    ap.add_argument("--adapter", required=True,
+                    help="Path to the LoRA adapter directory to evaluate.")
+    ap.add_argument("--name", default="standard",
+                    help="Identifier used in output file names.")
+    ap.add_argument("--dataset",
+                    help="Optional path to a custom eval-prompt JSONL file.")
     args = ap.parse_args()
     evaluate(args.config, args.adapter, args.name, args.dataset)
 
