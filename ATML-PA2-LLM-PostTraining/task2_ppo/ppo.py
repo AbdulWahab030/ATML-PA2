@@ -6,14 +6,17 @@ from common.metrics import masked_mean
 
 
 def compute_gae(rewards, values, mask, gamma=1.0, lam=0.95):
-    """Token-level GAE over response positions.
+    """Token-level GAE over response positions in float32 for numerical stability.
 
     rewards, values, mask: [batch, response_steps]. Padding positions must have mask=0.
     The final valid response position bootstraps with zero.
     """
+    rewards = rewards.float()
+    values = values.float()
+    mask = mask.float()
     batch, steps = rewards.shape
     advantages = torch.zeros_like(rewards)
-    last_adv = torch.zeros(batch, device=rewards.device, dtype=rewards.dtype)
+    last_adv = torch.zeros(batch, device=rewards.device, dtype=torch.float32)
 
     for t in reversed(range(steps)):
         current_valid = mask[:, t]
@@ -34,7 +37,11 @@ def compute_gae(rewards, values, mask, gamma=1.0, lam=0.95):
 
 
 def shaped_rewards(task_reward, policy_logp, ref_logp, response_mask, beta_kl):
-    """Sampled-action KL shaping plus terminal learned reward."""
+    """Sampled-action KL shaping plus terminal learned reward in float32."""
+    policy_logp = policy_logp.float()
+    ref_logp = ref_logp.float()
+    response_mask = response_mask.float()
+    task_reward = task_reward.float()
     rewards = -float(beta_kl) * (policy_logp - ref_logp) * response_mask
     for b in range(rewards.shape[0]):
         valid = int(response_mask[b].sum().item())
@@ -44,11 +51,16 @@ def shaped_rewards(task_reward, policy_logp, ref_logp, response_mask, beta_kl):
 
 
 def ppo_policy_loss(new_logp, old_logp, advantage, mask, eps=0.2):
-    """Return PPO clipped policy loss and diagnostics.
+    """Return PPO clipped policy loss and diagnostics in float32 precision.
 
     Validated against the clipped surrogate objective in the assignment manual:
         L_clip(theta) = E[min(rho_t * A_t, clip(rho_t, 1 - eps, 1 + eps) * A_t)]
     """
+    new_logp = new_logp.float()
+    old_logp = old_logp.float()
+    advantage = advantage.float()
+    mask = mask.float()
+
     log_ratio = torch.clamp(new_logp - old_logp, min=-20.0, max=20.0)
     ratio = torch.exp(log_ratio)
     surr1 = ratio * advantage
@@ -64,13 +76,21 @@ def ppo_policy_loss(new_logp, old_logp, advantage, mask, eps=0.2):
 
 
 def value_mse_loss(predicted_values, returns, mask):
-    return masked_mean((predicted_values - returns) ** 2, mask)
+    """Compute value MSE loss in float32 to prevent float16 overflow."""
+    pred = predicted_values.float()
+    ret = returns.float()
+    mask = mask.float()
+    diff = pred - ret
+    return masked_mean(diff ** 2, mask)
 
 
 def normalize_advantages(advantages, mask, eps=1e-6):
+    """Normalize advantages in float32 over valid response tokens."""
+    advantages = advantages.float()
+    mask = mask.float()
     valid = advantages[mask.bool()]
     if valid.numel() <= 1:
-        return advantages
+        return advantages * mask
     mean = valid.mean()
     std = valid.std(unbiased=False).clamp_min(eps)
     return ((advantages - mean) / std) * mask
