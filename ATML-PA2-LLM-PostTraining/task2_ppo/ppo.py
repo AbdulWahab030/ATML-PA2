@@ -78,6 +78,18 @@ def compute_gae(
     values = torch.nan_to_num(values.float(), nan=0.0, posinf=0.0, neginf=0.0)
     mask = mask.float()
 
+    if rewards.dim() == 1:
+        rewards = rewards.unsqueeze(0)
+    if values.dim() == 1:
+        values = values.unsqueeze(0)
+    if mask.dim() == 1:
+        mask = mask.unsqueeze(0)
+
+    min_len = min(rewards.shape[1], values.shape[1], mask.shape[1])
+    rewards = rewards[:, :min_len]
+    values = values[:, :min_len]
+    mask = mask[:, :min_len]
+
     batch, steps = rewards.shape
     advantages = torch.zeros_like(rewards)
     # Running accumulator initialised to zero (corresponds to A_{T+1} = 0).
@@ -152,6 +164,21 @@ def shaped_rewards(
     ref_logp = torch.nan_to_num(ref_logp.float(), nan=-100.0, posinf=0.0, neginf=-100.0)
     response_mask = response_mask.float()
     task_reward = torch.nan_to_num(task_reward.float(), nan=0.0, posinf=0.0, neginf=0.0)
+
+    if policy_logp.dim() == 1:
+        policy_logp = policy_logp.unsqueeze(0)
+    if ref_logp.dim() == 1:
+        ref_logp = ref_logp.unsqueeze(0)
+    if response_mask.dim() == 1:
+        response_mask = response_mask.unsqueeze(0)
+    if task_reward.dim() == 0:
+        task_reward = task_reward.unsqueeze(0)
+
+    # Align sequence length across dimensions
+    min_len = min(policy_logp.shape[1], ref_logp.shape[1], response_mask.shape[1])
+    policy_logp = policy_logp[:, :min_len]
+    ref_logp = ref_logp[:, :min_len]
+    response_mask = response_mask[:, :min_len]
 
     # Per-token KL penalty: −β_KL · (log π − log π_ref) at every valid token.
     kl_diff = policy_logp - ref_logp

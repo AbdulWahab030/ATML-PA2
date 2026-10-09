@@ -156,16 +156,34 @@ def analyze_cached_clipping(
         for r in rows:
             old_lp = r["old_logprobs"].to(device)
             ref_lp = r["ref_logprobs"].to(device)
-            resp = str(r["response"])
-            prompt_idx = r.get("source_index", 0)
+            if old_lp.dim() == 1:
+                old_lp = old_lp.unsqueeze(0)
+            if ref_lp.dim() == 1:
+                ref_lp = ref_lp.unsqueeze(0)
 
-            resp_enc = tokenizer(resp, return_tensors="pt", add_special_tokens=False)
-            resp_ids = resp_enc["input_ids"].to(device)
-            mask = torch.ones_like(resp_ids, dtype=torch.float32, device=device)
+            # Ensure old_lp and ref_lp lengths match
+            min_lp = min(old_lp.shape[1], ref_lp.shape[1])
+            old_lp = old_lp[:, :min_lp]
+            ref_lp = ref_lp[:, :min_lp]
 
-            if "rewards" in r:
+            # Use cached mask if available, otherwise match old_lp token count
+            if "mask" in r:
+                mask = r["mask"].to(device)
+                if mask.dim() == 1:
+                    mask = mask.unsqueeze(0)
+                mask = mask[:, :min_lp]
+            else:
+                mask = torch.ones_like(old_lp, dtype=torch.float32, device=device)
+
+            if "effective_terminal_reward" in r:
+                task_rew = torch.as_tensor([float(r["effective_terminal_reward"])], device=device)
+            elif "raw_terminal_reward" in r:
+                task_rew = torch.as_tensor([float(r["raw_terminal_reward"])], device=device)
+            elif "rewards" in r:
                 task_rew = torch.as_tensor([float(r["rewards"])], device=device)
             else:
+                resp = str(r.get("response", ""))
+                prompt_idx = r.get("source_index", 0)
                 with _inference_autocast(device):
                     task_rew = score_reward_pairs(
                         reward_model,
@@ -174,9 +192,13 @@ def analyze_cached_clipping(
                         [resp],
                     ).to(device)
 
-            vals = r["values"].to(device) if "values" in r else torch.zeros_like(
-                old_lp, dtype=torch.float32
-            )
+            if "values" in r:
+                vals = r["values"].to(device)
+                if vals.dim() == 1:
+                    vals = vals.unsqueeze(0)
+                vals = vals[:, :min_lp]
+            else:
+                vals = torch.zeros_like(old_lp, dtype=torch.float32)
 
             shaped_rew = shaped_rewards(
                 task_rew, old_lp, ref_lp, mask, float(cfg.get("kl_beta", 0.10))
@@ -188,15 +210,15 @@ def analyze_cached_clipping(
             )
             norm_adv = normalize_advantages(adv, mask)
 
-            old_logp_list.append(old_lp.squeeze(0) if old_lp.dim() > 1 else old_lp)
-            new_logp_list.append(old_lp.squeeze(0) if old_lp.dim() > 1 else old_lp)
-            adv_list.append(norm_adv.squeeze(0) if norm_adv.dim() > 1 else norm_adv)
-            mask_list.append(mask.squeeze(0) if mask.dim() > 1 else mask)
+            old_logp_list.append(old_lp.squeeze(0))
+            new_logp_list.append(old_lp.squeeze(0))
+            adv_list.append(norm_adv.squeeze(0))
+            mask_list.append(mask.squeeze(0))
 
-        all_old_logp = torch.cat(old_logp_list, dim=-1)
-        all_new_logp = torch.cat(new_logp_list, dim=-1)
-        all_advantages = torch.cat(adv_list, dim=-1)
-        all_mask = torch.cat(mask_list, dim=-1)
+        all_old_logp = torch.cat(old_logp_list, dim=0)
+        all_new_logp = torch.cat(new_logp_list, dim=0)
+        all_advantages = torch.cat(adv_list, dim=0)
+        all_mask = torch.cat(mask_list, dim=0)
 
         clear_gpu(policy, value_model, reward_model)
 
