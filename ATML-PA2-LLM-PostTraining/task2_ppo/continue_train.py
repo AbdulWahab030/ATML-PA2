@@ -383,11 +383,18 @@ def run_ppo(
                 response_mask,
                 eps=clip_eps,
             )
-            loss_pi.backward()
-            pi_norm = torch.nn.utils.clip_grad_norm_(
-                trainable_parameters(policy), max_norm=max_grad_norm
-            )
-            policy_optimizer.step()
+            if torch.isfinite(loss_pi):
+                loss_pi.backward()
+                pi_norm = torch.nn.utils.clip_grad_norm_(
+                    trainable_parameters(policy), max_norm=max_grad_norm
+                )
+                if torch.isfinite(torch.as_tensor(pi_norm)):
+                    policy_optimizer.step()
+                else:
+                    policy_optimizer.zero_grad(set_to_none=True)
+            else:
+                pi_norm = 0.0
+                policy_optimizer.zero_grad(set_to_none=True)
 
             # ---- Value update ----
             value_model.train()
@@ -395,12 +402,25 @@ def run_ppo(
 
             new_val_all = token_values(value_model, sequences, attention_mask)
             pred_values = new_val_all[:, prompt_width - 1: -1][:, : response_ids.shape[1]]
-            loss_v = value_mse_loss(pred_values, returns.detach(), response_mask)
-            loss_v.backward()
-            v_norm = torch.nn.utils.clip_grad_norm_(
-                trainable_parameters(value_model), max_norm=max_grad_norm
+            loss_v = value_mse_loss(
+                pred_values,
+                returns.detach(),
+                response_mask,
+                old_values=old_values.detach(),
+                clip_eps=clip_eps,
             )
-            value_optimizer.step()
+            if torch.isfinite(loss_v):
+                loss_v.backward()
+                v_norm = torch.nn.utils.clip_grad_norm_(
+                    trainable_parameters(value_model), max_norm=max_grad_norm
+                )
+                if torch.isfinite(torch.as_tensor(v_norm)):
+                    value_optimizer.step()
+                else:
+                    value_optimizer.zero_grad(set_to_none=True)
+            else:
+                v_norm = 0.0
+                value_optimizer.zero_grad(set_to_none=True)
 
             # Accumulate diagnostics across PPO epochs.
             policy_loss_acc += float(loss_pi.detach().item())

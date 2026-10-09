@@ -200,7 +200,9 @@ def analyze_cached_clipping(
 
         clear_gpu(policy, value_model, reward_model)
 
-    ratio = torch.exp(torch.clamp(all_new_logp - all_old_logp, min=-20.0, max=20.0))
+    diff = torch.nan_to_num(all_new_logp - all_old_logp, nan=0.0, posinf=20.0, neginf=-20.0)
+    ratio = torch.exp(torch.clamp(diff, min=-20.0, max=20.0))
+    ratio = torch.nan_to_num(ratio, nan=1.0)
     cached_metrics: list[dict] = []
 
     for eps in epsilons:

@@ -74,8 +74,8 @@ def compute_gae(
         returns:    ``[batch, response_steps]`` empirical returns (value
                     targets), zero at padding positions.
     """
-    rewards = rewards.float()
-    values = values.float()
+    rewards = torch.nan_to_num(rewards.float(), nan=0.0, posinf=0.0, neginf=0.0)
+    values = torch.nan_to_num(values.float(), nan=0.0, posinf=0.0, neginf=0.0)
     mask = mask.float()
 
     batch, steps = rewards.shape
@@ -110,6 +110,8 @@ def compute_gae(
     # raw (non-zero) critic predictions at pad positions in the targets.
     masked_values = values * mask
     returns = advantages + masked_values
+    advantages = torch.nan_to_num(advantages, nan=0.0, posinf=0.0, neginf=0.0)
+    returns = torch.nan_to_num(returns, nan=0.0, posinf=0.0, neginf=0.0)
     return advantages, returns
 
 
@@ -146,13 +148,15 @@ def shaped_rewards(
         shaped: ``[batch, response_steps]`` per-token shaped rewards; zero
                 at padding positions.
     """
-    policy_logp = policy_logp.float()
-    ref_logp = ref_logp.float()
+    policy_logp = torch.nan_to_num(policy_logp.float(), nan=-100.0, posinf=0.0, neginf=-100.0)
+    ref_logp = torch.nan_to_num(ref_logp.float(), nan=-100.0, posinf=0.0, neginf=-100.0)
     response_mask = response_mask.float()
-    task_reward = task_reward.float()
+    task_reward = torch.nan_to_num(task_reward.float(), nan=0.0, posinf=0.0, neginf=0.0)
 
     # Per-token KL penalty: −β_KL · (log π − log π_ref) at every valid token.
-    shaped = -float(beta_kl) * (policy_logp - ref_logp) * response_mask
+    kl_diff = policy_logp - ref_logp
+    kl_diff = torch.clamp(kl_diff, min=-50.0, max=50.0)
+    shaped = -float(beta_kl) * kl_diff * response_mask
 
     # Add terminal task reward at the *last valid* response token per sequence.
     # response_mask is right-padded (1s from 0 … n-1, then 0s), so
@@ -162,7 +166,7 @@ def shaped_rewards(
         if valid_len > 0:
             shaped[b, valid_len - 1] += task_reward[b]
 
-    return shaped
+    return torch.nan_to_num(shaped, nan=0.0, posinf=0.0, neginf=0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -204,20 +208,24 @@ def ppo_policy_loss(
         clip_fraction: Scalar fraction of valid tokens with ρ outside
                        ``[1−ε, 1+ε]``.
     """
-    new_logp = new_logp.float()
-    old_logp = old_logp.float()
-    advantage = advantage.float()
+    new_logp = torch.nan_to_num(new_logp.float(), nan=-100.0, posinf=0.0, neginf=-100.0)
+    old_logp = torch.nan_to_num(old_logp.float(), nan=-100.0, posinf=0.0, neginf=-100.0)
+    advantage = torch.nan_to_num(advantage.float(), nan=0.0, posinf=0.0, neginf=0.0)
     mask = mask.float()
 
-    # Clamp log-ratio before exponentiation for numerical stability.
+    # Clamp log-ratio before exponentiation to avoid extreme exponentiation values before clipping.
     log_ratio = torch.clamp(new_logp - old_logp, min=-20.0, max=20.0)
+    log_ratio = torch.nan_to_num(log_ratio, nan=0.0, posinf=20.0, neginf=-20.0)
     ratio = torch.exp(log_ratio)          # ρ_t = π_θ / π_old
+    ratio = torch.nan_to_num(ratio, nan=1.0, posinf=1.0 + eps, neginf=0.0)
+    ratio = torch.clamp(ratio, min=0.0, max=10.0)
 
     surr1 = ratio * advantage                               # unclipped
     surr2 = ratio.clamp(1.0 - eps, 1.0 + eps) * advantage  # clipped ratio
 
     # Pessimistic (conservative) lower bound for both +/− advantage signs.
     objective = torch.minimum(surr1, surr2)
+    objective = torch.nan_to_num(objective, nan=0.0)
 
     # Gradient ascent on L_clip  →  minimise its negative.
     loss = -masked_mean(objective, mask)
@@ -237,26 +245,46 @@ def value_mse_loss(
     predicted_values: torch.Tensor,
     returns: torch.Tensor,
     mask: torch.Tensor,
+    old_values: torch.Tensor | None = None,
+    clip_eps: float | None = None,
 ) -> torch.Tensor:
-    """Masked mean-squared-error loss for the value function.
+    """Masked value loss with standard PPO value clipping.
 
-    Minimises E[(V_φ(s_t) − R_t)²] over valid response tokens.
-    ``returns`` must be passed **detached**; they are treated as fixed
-    regression targets and should not receive gradients.
+    Minimises:
+        L^{VF} = max((V_θ - R)², (V_old + clip(V_θ - V_old, -ε, ε) - R)²)
+
+    when ``old_values`` and ``clip_eps`` are provided. Otherwise minimises
+    standard masked MSE: (V_θ - R)².
 
     Args:
-        predicted_values: ``[batch, steps]`` value-model predictions V_φ(s_t).
+        predicted_values: ``[batch, steps]`` value-model predictions V_θ(s_t).
         returns:          ``[batch, steps]`` empirical returns R_t (detached).
         mask:             ``[batch, steps]`` binary validity mask.
+        old_values:       ``[batch, steps]`` old value predictions V_old(s_t) (detached).
+        clip_eps:         Clipping parameter ε (e.g. 0.20).
 
     Returns:
-        Scalar MSE loss averaged over valid tokens.
+        Scalar value loss averaged over valid tokens.
     """
-    pred = predicted_values.float()
-    ret = returns.float()
+    pred = torch.nan_to_num(predicted_values.float(), nan=0.0, posinf=1e4, neginf=-1e4)
+    ret = torch.nan_to_num(returns.float(), nan=0.0, posinf=1e4, neginf=-1e4)
     mask = mask.float()
-    diff = pred - ret
-    return masked_mean(diff ** 2, mask)
+
+    if old_values is not None and clip_eps is not None:
+        old_v = torch.nan_to_num(old_values.float(), nan=0.0, posinf=1e4, neginf=-1e4)
+        eps = float(clip_eps)
+        v_clipped = old_v + torch.clamp(pred - old_v, -eps, eps)
+        v_loss_unclipped = (pred - ret) ** 2
+        v_loss_clipped = (v_clipped - ret) ** 2
+        v_loss = torch.max(v_loss_unclipped, v_loss_clipped)
+    else:
+        v_loss = (pred - ret) ** 2
+
+    v_loss = torch.nan_to_num(v_loss, nan=0.0, posinf=1e4, neginf=0.0)
+    return masked_mean(v_loss, mask)
+
+
+value_loss = value_mse_loss
 
 
 # ---------------------------------------------------------------------------
@@ -265,32 +293,37 @@ def value_mse_loss(
 
 def normalize_advantages(
     advantages: torch.Tensor,
-    mask: torch.Tensor,
-    eps: float = 1e-6,
+    mask: torch.Tensor | None = None,
+    eps: float = 1e-8,
 ) -> torch.Tensor:
-    """Normalise advantages to zero mean and unit variance over valid tokens.
+    """Normalise advantages across the batch: (advantages - advantages.mean()) / (advantages.std() + 1e-8).
 
-    Normalisation statistics are computed across **all** valid response
-    tokens in the batch (i.e. the token-level, not sequence-level,
-    distribution is standardised).  Padding positions are zeroed out
+    Normalisation statistics are computed across all valid response
+    tokens in the batch.  Padding positions are zeroed out
     after normalisation.
 
     Args:
         advantages: ``[batch, steps]`` raw GAE advantages.
-        mask:       ``[batch, steps]`` binary validity mask.
-        eps:        Small constant to prevent division by zero (default 1e-6).
+        mask:       ``[batch, steps]`` binary validity mask (optional).
+        eps:        Small constant to prevent division by zero (default 1e-8).
 
     Returns:
         ``[batch, steps]`` normalised advantages; padding positions are 0.
     """
-    advantages = advantages.float()
-    mask = mask.float()
+    advantages = torch.nan_to_num(advantages.float(), nan=0.0, posinf=0.0, neginf=0.0)
+    if mask is not None:
+        mask = mask.float()
+        valid = advantages[mask.bool()]
+        if valid.numel() <= 1:
+            return advantages * mask
 
-    # Select all valid token advantages as a flat 1-D tensor.
-    valid = advantages[mask.bool()]
-    if valid.numel() <= 1:
-        return advantages * mask
-
-    mean = valid.mean()
-    std = valid.std(unbiased=False).clamp_min(eps)
-    return ((advantages - mean) / std) * mask
+        mean = valid.mean()
+        std = valid.std(unbiased=False)
+        normalized = (advantages - mean) / (std + eps)
+        normalized = torch.nan_to_num(normalized, nan=0.0, posinf=0.0, neginf=0.0)
+        return normalized * mask
+    else:
+        mean = advantages.mean()
+        std = advantages.std(unbiased=False)
+        normalized = (advantages - mean) / (std + eps)
+        return torch.nan_to_num(normalized, nan=0.0, posinf=0.0, neginf=0.0)
