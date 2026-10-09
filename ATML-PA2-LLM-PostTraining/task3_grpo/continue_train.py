@@ -246,13 +246,12 @@ def run_grpo(
         responses = generated["responses"]
         response_lengths = generated["response_lengths"]
 
-        # Check truncation at max_completion_length without EOS
-        truncated = []
-        for i, length in enumerate(response_lengths):
-            is_trunc = (length >= max_completion_length) and (
-                sequences[i, -1].item() != tokenizer.eos_token_id
-            )
-            truncated.append(is_trunc)
+        # Use the correct truncation flags from batch_generate, which properly
+        # checks whether each response reached max_new_tokens without emitting EOS.
+        # The previous hand-rolled check inspected sequences[i, -1] which points at
+        # a PAD token in padded batches, causing almost all completions to be wrongly
+        # flagged as truncated → effective_mask zeroed → loss = 0 on most steps.
+        truncated = generated["truncated"]
 
         if mask_truncated:
             effective_mask = mask_truncated_sequences(response_mask, truncated)
@@ -270,7 +269,7 @@ def run_grpo(
                 responses,
                 max_length=reward_max_length,
             )
-        rewards = torch.tensor(raw_rewards, dtype=torch.float32, device=device)
+        rewards = raw_rewards.detach().clone().to(dtype=torch.float32, device=device)
 
         # ------------------------------------------------------------------
         # 4. Old policy logprobs and reference policy logprobs
@@ -360,14 +359,17 @@ def run_grpo(
         }
         trajectory.append(step_entry)
 
+        kl_display = f"{step_entry['sampled_kl']:.5f}" if step_entry['sampled_kl'] >= 1e-4 else f"{step_entry['sampled_kl']:.2e}"
         print(
             f"Step {step:2d}/{total_updates} | "
             f"R={step_entry['reward_mean']:+.3f} | "
             f"within_std={step_entry['within_group_reward_std']:.3f} | "
             f"uninf={step_entry['uninformative_group_fraction']:.2f} | "
-            f"KL={step_entry['sampled_kl']:.4f} | "
+            f"KL={kl_display} | "
             f"loss={step_entry['policy_loss']:.4f} | "
             f"clip={step_entry['clip_fraction']:.3f} | "
+            f"grad_norm={step_entry['grad_norm']:.4f} | "
+            f"entropy={step_entry['sample_entropy']:.4f} | "
             f"len={mean_len:.1f} | "
             f"t={step_elapsed:.1f}s"
         )
