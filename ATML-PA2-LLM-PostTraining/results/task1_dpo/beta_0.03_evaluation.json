@@ -1,0 +1,26 @@
+{
+  "name": "beta_0.03",
+  "adapter": "/kaggle/working/ATML-PA2/ATML-PA2-LLM-PostTraining/outputs/task1_dpo/beta_0.03",
+  "evaluation_dataset": "data/dpo_standard_eval.jsonl",
+  "num_rows_total": 300,
+  "num_rows_evaluated": 290,
+  "num_rows_excluded_for_length": 10,
+  "beta": 0.1,
+  "heldout_dpo_loss": 0.686642964955034,
+  "heldout_preference_accuracy": 0.6206896551724138,
+  "sampled_policy_reference_kl_per_token": -0.0001219742120530484,
+  "generated_reward_model_score_mean": 1.251159536427465,
+  "generated_reward_model_score_std": 1.2124091386795044,
+  "generated_response_tokens_mean": 154.08275862068965,
+  "generated_response_tokens_min": 2,
+  "generated_response_tokens_max": 256,
+  "generated_response_words_mean": 111.70344827586207,
+  "generation_truncated_count": 129,
+  "generation_max_new_tokens": 256,
+  "generation_settings": {
+    "temperature": 0.7,
+    "top_p": 0.9,
+    "do_sample": true
+  },
+  "generations_file": "/kaggle/working/ATML-PA2/ATML-PA2-LLM-PostTraining/results/task1_dpo/beta_0.03_generations.jsonl"
+}
