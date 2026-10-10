@@ -1,0 +1,17 @@
+{
+  "name": "standard",
+  "adapter": "outputs/task3_grpo/standard",
+  "evaluation_dataset": "data/rl_prompt_pool_eval.jsonl",
+  "num_prompts_evaluated": 200,
+  "reward_score_mean": 1.5241181182861328,
+  "reward_score_std": 1.517134056932576,
+  "sampled_policy_reference_kl_per_token": 0.00016327200670792927,
+  "response_length_tokens_mean": 300.125,
+  "response_length_tokens_std": 246.53174111055154,
+  "response_length_tokens_iqr": 406.5,
+  "response_length_tokens_min": 2,
+  "response_length_tokens_max": 768,
+  "response_words_mean": 207.515,
+  "truncated_sequences_count": 14,
+  "truncated_sequences_fraction": 0.07
+}

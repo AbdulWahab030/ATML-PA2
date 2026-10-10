@@ -1,0 +1,16 @@
+{
+  "name": "clip_0.05",
+  "adapter": "/kaggle/working/ATML-PA2/ATML-PA2-LLM-PostTraining/outputs/task2_ppo/clip_0.05",
+  "evaluation_dataset": "data/rl_prompt_pool_eval.jsonl",
+  "num_prompts_evaluated": 200,
+  "reward_score_mean": 1.5590694427490235,
+  "reward_score_std": 1.4284309148788452,
+  "sampled_policy_reference_kl_per_token": -1.4996096045478205e-05,
+  "response_tokens_mean": 290.83,
+  "response_tokens_min": 2,
+  "response_tokens_max": 768,
+  "response_words_mean": 204.07,
+  "truncated_count": 12,
+  "eval_max_response_length": 768,
+  "generations_file": "/kaggle/working/ATML-PA2/ATML-PA2-LLM-PostTraining/results/task2_ppo/clip_0.05_generations.jsonl"
+}

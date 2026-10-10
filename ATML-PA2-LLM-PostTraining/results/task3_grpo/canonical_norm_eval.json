@@ -1,0 +1,17 @@
+{
+  "name": "canonical_norm",
+  "adapter": "outputs/task3_grpo/canonical_norm",
+  "evaluation_dataset": "data/rl_prompt_pool_eval.jsonl",
+  "num_prompts_evaluated": 200,
+  "reward_score_mean": 1.480642876625061,
+  "reward_score_std": 1.4365998243824294,
+  "sampled_policy_reference_kl_per_token": 9.829121262146404e-05,
+  "response_length_tokens_mean": 299.645,
+  "response_length_tokens_std": 251.65442371434682,
+  "response_length_tokens_iqr": 412.5,
+  "response_length_tokens_min": 2,
+  "response_length_tokens_max": 768,
+  "response_words_mean": 208.645,
+  "truncated_sequences_count": 16,
+  "truncated_sequences_fraction": 0.08
+}

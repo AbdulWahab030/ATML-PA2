@@ -1,0 +1,16 @@
+{
+  "name": "standard",
+  "adapter": "outputs/task2_ppo/standard",
+  "evaluation_dataset": "data/rl_prompt_pool_eval.jsonl",
+  "num_prompts_evaluated": 200,
+  "reward_score_mean": 1.4556457901000976,
+  "reward_score_std": 1.4349405765533447,
+  "sampled_policy_reference_kl_per_token": 3.8056861482004194e-06,
+  "response_tokens_mean": 306.155,
+  "response_tokens_min": 2,
+  "response_tokens_max": 768,
+  "response_words_mean": 214.905,
+  "truncated_count": 18,
+  "eval_max_response_length": 768,
+  "generations_file": "/kaggle/working/ATML-PA2/ATML-PA2-LLM-PostTraining/results/task2_ppo/standard_generations.jsonl"
+}

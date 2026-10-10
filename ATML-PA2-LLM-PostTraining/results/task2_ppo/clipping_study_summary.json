@@ -1,0 +1,54 @@
+{
+  "cached_rollout_analysis": [
+    {
+      "epsilon": 0.05,
+      "clip_fraction": 0.0,
+      "affected_token_fraction": 0.0,
+      "surrogate_objective_mean": 8.655995364925673e-10
+    },
+    {
+      "epsilon": 0.2,
+      "clip_fraction": 0.0,
+      "affected_token_fraction": 0.0,
+      "surrogate_objective_mean": 8.655995364925673e-10
+    },
+    {
+      "epsilon": 0.5,
+      "clip_fraction": 0.0,
+      "affected_token_fraction": 0.0,
+      "surrogate_objective_mean": 8.655995364925673e-10
+    }
+  ],
+  "online_fork_analysis": [
+    {
+      "epsilon": 0.05,
+      "heldout_reward_mean": 1.5590694427490235,
+      "heldout_reward_std": 1.4284309148788452,
+      "heldout_kl_per_token": -1.4996096045478205e-05,
+      "heldout_response_tokens_mean": 290.83,
+      "training_grad_norm_std": 0.45580901859476197,
+      "training_loss_std": 0.00020519492182403333,
+      "training_mean_clip_fraction": 0.0
+    },
+    {
+      "epsilon": 0.2,
+      "heldout_reward_mean": 1.5590694427490235,
+      "heldout_reward_std": 1.4284309148788452,
+      "heldout_kl_per_token": -1.4996096045478205e-05,
+      "heldout_response_tokens_mean": 290.83,
+      "training_grad_norm_std": 0.45580901859476197,
+      "training_loss_std": 0.00020519492182403333,
+      "training_mean_clip_fraction": 0.0
+    },
+    {
+      "epsilon": 0.5,
+      "heldout_reward_mean": 1.5590694427490235,
+      "heldout_reward_std": 1.4284309148788452,
+      "heldout_kl_per_token": -1.4996096045478205e-05,
+      "heldout_response_tokens_mean": 290.83,
+      "training_grad_norm_std": 0.45580901859476197,
+      "training_loss_std": 0.00020519492182403333,
+      "training_mean_clip_fraction": 0.0
+    }
+  ]
+}

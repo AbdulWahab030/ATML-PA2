@@ -1,0 +1,33 @@
+{
+  "fork_updates": 8,
+  "canonical_grpo": {
+    "adapter": "outputs/task3_grpo/canonical_norm",
+    "reward_score_mean": 1.480642876625061,
+    "reward_score_std": 1.4365998243824294,
+    "sampled_policy_reference_kl_per_token": 9.829121262146404e-05,
+    "response_length_tokens_mean": 299.645,
+    "response_length_tokens_iqr": 412.5
+  },
+  "dr_grpo": {
+    "adapter": "outputs/task3_grpo/dr_grpo_norm",
+    "reward_score_mean": 1.446396484375,
+    "reward_score_std": 1.4427745419677869,
+    "sampled_policy_reference_kl_per_token": 0.00010015194754323568,
+    "response_length_tokens_mean": 293.55,
+    "response_length_tokens_iqr": 413.0
+  },
+  "deltas_dr_minus_canonical": {
+    "reward_delta": -0.0342,
+    "kl_delta": 0.0,
+    "length_delta_tokens": -6.09
+  },
+  "length_conditioned_gradient_analysis": {
+    "max_completion_length": 512,
+    "canonical_trajectory_mean_length": 275.62,
+    "dr_grpo_trajectory_mean_length": 273.59,
+    "trajectory_length_difference_tokens": -2.03,
+    "canonical_average_short_sequence_amplification": 3.423,
+    "dr_grpo_sequence_amplification": 1.0,
+    "theoretical_bias_description": "Canonical GRPO scales each token gradient by 1/|y_k|, assigning proportionally larger gradient updates to short completions (amplification = L_max / |y_k|). Dr. GRPO uses a constant 1/L_max scaling, removing the penalty against longer, thorough completions."
+  }
+}
