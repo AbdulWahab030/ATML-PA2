@@ -183,8 +183,34 @@ def analyze_cached_clipping(
                 msgs = [{"role": "user", "content": f"Prompt {sidx if sidx is not None else pid}"}]
 
             # 2. Compute the ACTUAL new_logprobs using the midpoint policy
+            prompt_str = tokenizer.apply_chat_template(
+                msgs, tokenize=False, add_generation_prompt=True
+            )
+            prompt_enc = tokenizer(prompt_str, return_tensors="pt", add_special_tokens=False)
+            prompt_input_ids = prompt_enc["input_ids"].to(device)
+            p_width = prompt_input_ids.shape[1]
+
+            resp_enc = tokenizer(resp, return_tensors="pt", add_special_tokens=False)
+            resp_input_ids = resp_enc["input_ids"].to(device)
+
+            # Ensure response length matches old_lp length
+            if resp_input_ids.shape[1] > old_lp.shape[1]:
+                resp_input_ids = resp_input_ids[:, :old_lp.shape[1]]
+            elif resp_input_ids.shape[1] < old_lp.shape[1]:
+                old_lp = old_lp[:, :resp_input_ids.shape[1]]
+                ref_lp = ref_lp[:, :resp_input_ids.shape[1]]
+
+            seq = torch.cat([prompt_input_ids, resp_input_ids], dim=1)
+            attn_mask = torch.ones_like(seq, dtype=torch.long, device=device)
+
             with torch.no_grad():
-                new_lp = response_token_logprobs(policy, tokenizer, msgs, resp).to(device)
+                new_lp, _ = response_token_logprobs(
+                    policy,
+                    seq,
+                    attn_mask,
+                    p_width,
+                    resp_input_ids,
+                )
             if new_lp.dim() == 1:
                 new_lp = new_lp.unsqueeze(0)
 
