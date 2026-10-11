@@ -11,8 +11,8 @@
     "policy_grad_norm": 0.24728532135486603,
     "value_grad_norm": NaN,
     "response_length_tokens": 512.0,
-    "step_wall_clock_seconds": 31.711318969726562,
-    "peak_vram_mb": 6278.72998046875
+    "step_wall_clock_seconds": 28.56240177154541,
+    "peak_vram_mb": 7008.6142578125
   },
   {
     "update": 2,
@@ -26,8 +26,8 @@
     "policy_grad_norm": 0.3688783496618271,
     "value_grad_norm": NaN,
     "response_length_tokens": 409.0,
-    "step_wall_clock_seconds": 25.15671396255493,
-    "peak_vram_mb": 6278.72998046875
+    "step_wall_clock_seconds": 22.520278453826904,
+    "peak_vram_mb": 7008.6142578125
   },
   {
     "update": 3,
@@ -41,8 +41,8 @@
     "policy_grad_norm": 0.2980819046497345,
     "value_grad_norm": NaN,
     "response_length_tokens": 251.0,
-    "step_wall_clock_seconds": 15.804612398147583,
-    "peak_vram_mb": 6278.72998046875
+    "step_wall_clock_seconds": 14.020912647247314,
+    "peak_vram_mb": 7008.6142578125
   },
   {
     "update": 4,
@@ -56,8 +56,8 @@
     "policy_grad_norm": 1.6161767840385437,
     "value_grad_norm": NaN,
     "response_length_tokens": 33.0,
-    "step_wall_clock_seconds": 3.2619969844818115,
-    "peak_vram_mb": 6278.72998046875
+    "step_wall_clock_seconds": 2.9507808685302734,
+    "peak_vram_mb": 7008.6142578125
   },
   {
     "update": 5,
@@ -71,8 +71,8 @@
     "policy_grad_norm": 0.19027107954025269,
     "value_grad_norm": NaN,
     "response_length_tokens": 512.0,
-    "step_wall_clock_seconds": 31.481125593185425,
-    "peak_vram_mb": 6317.73828125
+    "step_wall_clock_seconds": 28.379427909851074,
+    "peak_vram_mb": 7037.64501953125
   },
   {
     "update": 6,
@@ -86,8 +86,8 @@
     "policy_grad_norm": 0.3820461332798004,
     "value_grad_norm": NaN,
     "response_length_tokens": 150.0,
-    "step_wall_clock_seconds": 9.880724906921387,
-    "peak_vram_mb": 6317.73828125
+    "step_wall_clock_seconds": 8.927243709564209,
+    "peak_vram_mb": 7037.64501953125
   },
   {
     "update": 7,
@@ -101,8 +101,8 @@
     "policy_grad_norm": 0.9247178733348846,
     "value_grad_norm": NaN,
     "response_length_tokens": 98.0,
-    "step_wall_clock_seconds": 7.1660380363464355,
-    "peak_vram_mb": 6317.73828125
+    "step_wall_clock_seconds": 6.308558464050293,
+    "peak_vram_mb": 7037.64501953125
   },
   {
     "update": 8,
@@ -116,7 +116,7 @@
     "policy_grad_norm": 0.17176984995603561,
     "value_grad_norm": NaN,
     "response_length_tokens": 457.0,
-    "step_wall_clock_seconds": 28.16634511947632,
-    "peak_vram_mb": 6317.73828125
+    "step_wall_clock_seconds": 25.283382892608643,
+    "peak_vram_mb": 7037.64501953125
   }
 ]

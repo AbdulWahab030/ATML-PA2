@@ -2,21 +2,21 @@
   "cached_rollout_analysis": [
     {
       "epsilon": 0.05,
-      "clip_fraction": 0.0,
-      "affected_token_fraction": 0.0,
-      "surrogate_objective_mean": 8.655995364925673e-10
+      "clip_fraction": 0.15449374914169312,
+      "affected_token_fraction": 0.07576791942119598,
+      "surrogate_objective_mean": -0.01228590589016676
     },
     {
       "epsilon": 0.2,
-      "clip_fraction": 0.0,
-      "affected_token_fraction": 0.0,
-      "surrogate_objective_mean": 8.655995364925673e-10
+      "clip_fraction": 0.041410695761442184,
+      "affected_token_fraction": 0.019453924149274826,
+      "surrogate_objective_mean": -0.008565685711801052
     },
     {
       "epsilon": 0.5,
-      "clip_fraction": 0.0,
-      "affected_token_fraction": 0.0,
-      "surrogate_objective_mean": 8.655995364925673e-10
+      "clip_fraction": 0.021160408854484558,
+      "affected_token_fraction": 0.009670079685747623,
+      "surrogate_objective_mean": -0.005856913514435291
     }
   ],
   "online_fork_analysis": [
