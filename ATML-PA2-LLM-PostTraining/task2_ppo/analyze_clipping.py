@@ -161,12 +161,24 @@ def analyze_cached_clipping(
             if ref_lp.dim() == 1:
                 ref_lp = ref_lp.unsqueeze(0)
 
-            # Ensure old_lp and ref_lp lengths match
-            min_lp = min(old_lp.shape[1], ref_lp.shape[1])
+            # 1. Fetch the real prompt and response
+            prompt_idx = r.get("source_index", 0)
+            resp = str(r.get("response", ""))
+            msgs = prompt_messages(prompt_idx)
+
+            # 2. Compute the ACTUAL new_logprobs using the midpoint policy
+            with torch.no_grad():
+                new_lp = response_token_logprobs(policy, tokenizer, msgs, resp).to(device)
+            if new_lp.dim() == 1:
+                new_lp = new_lp.unsqueeze(0)
+
+            # 3. Ensure all logprobs match the minimum length (in case of tokenization quirks)
+            min_lp = min(old_lp.shape[1], ref_lp.shape[1], new_lp.shape[1])
             old_lp = old_lp[:, :min_lp]
             ref_lp = ref_lp[:, :min_lp]
+            new_lp = new_lp[:, :min_lp]
 
-            # Use cached mask if available, otherwise match old_lp token count
+            # 4. Handle Mask
             if "mask" in r:
                 mask = r["mask"].to(device)
                 if mask.dim() == 1:
@@ -175,6 +187,7 @@ def analyze_cached_clipping(
             else:
                 mask = torch.ones_like(old_lp, dtype=torch.float32, device=device)
 
+            # 5. Compute the accurate reward score using the REAL prompt
             if "effective_terminal_reward" in r:
                 task_rew = torch.as_tensor([float(r["effective_terminal_reward"])], device=device)
             elif "raw_terminal_reward" in r:
@@ -182,16 +195,15 @@ def analyze_cached_clipping(
             elif "rewards" in r:
                 task_rew = torch.as_tensor([float(r["rewards"])], device=device)
             else:
-                resp = str(r.get("response", ""))
-                prompt_idx = r.get("source_index", 0)
                 with _inference_autocast(device):
                     task_rew = score_reward_pairs(
                         reward_model,
                         reward_tokenizer,
-                        [[{"role": "user", "content": f"Prompt {prompt_idx}"}]],
+                        [msgs],  # Replaced dummy prompt with actual messages
                         [resp],
                     ).to(device)
 
+            # 6. Values & GAE
             if "values" in r:
                 vals = r["values"].to(device)
                 if vals.dim() == 1:
@@ -210,8 +222,9 @@ def analyze_cached_clipping(
             )
             norm_adv = normalize_advantages(adv, mask)
 
+            # 7. Append the CORRECT tensors
             old_logp_list.append(old_lp.squeeze(0))
-            new_logp_list.append(old_lp.squeeze(0))
+            new_logp_list.append(new_lp.squeeze(0))  # Now actually appends the updated logprobs!
             adv_list.append(norm_adv.squeeze(0))
             mask_list.append(mask.squeeze(0))
 
