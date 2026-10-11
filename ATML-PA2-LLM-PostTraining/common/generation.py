@@ -4,6 +4,55 @@ import torch
 import torch.nn.functional as F
 
 
+try:
+    from transformers.generation.logits_process import LogitsProcessor, LogitsProcessorList
+except ImportError:
+    class LogitsProcessor:
+        pass
+    class LogitsProcessorList(list):
+        def __call__(self, input_ids, scores):
+            for processor in self:
+                scores = processor(input_ids, scores)
+            return scores
+
+
+class SafeLogitsProcessor(LogitsProcessor):
+    """Logits processor that sanitizes non-finite values and clamps logits before sampling."""
+
+    def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor) -> torch.FloatTensor:
+        scores = torch.nan_to_num(scores.float(), nan=-1e4, posinf=1e4, neginf=-1e4)
+        return torch.clamp(scores, min=-50.0, max=50.0)
+
+
+# Safe multinomial wrapper to guarantee no NaN, Inf, or negative probabilities reach torch.multinomial
+_orig_multinomial = torch.multinomial
+
+
+def safe_multinomial(
+    input: torch.Tensor,
+    num_samples: int,
+    replacement: bool = False,
+    *,
+    generator: torch.Generator | None = None,
+    out: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Clamp probabilities and remove NaNs/Infs before calling PyTorch sampling."""
+    probs = input.float()
+    probs = torch.nan_to_num(probs, nan=0.0, posinf=0.0, neginf=0.0)
+    probs = torch.clamp(probs, min=0.0, max=1.0)
+    prob_sum = probs.sum(dim=-1, keepdim=True)
+    zero_mask = prob_sum <= 0.0
+    if zero_mask.any():
+        fallback = torch.ones_like(probs) / max(1, probs.shape[-1])
+        probs = torch.where(zero_mask, fallback, probs / prob_sum.clamp_min(1e-8))
+    else:
+        probs = probs / prob_sum.clamp_min(1e-8)
+    return _orig_multinomial(probs, num_samples, replacement=replacement, generator=generator, out=out)
+
+
+torch.multinomial = safe_multinomial
+
+
 def _response_mask(response_ids: torch.Tensor, eos_id: int | None) -> torch.Tensor:
     mask = torch.ones_like(response_ids, dtype=torch.float32)
     if eos_id is None:
@@ -48,6 +97,7 @@ def batch_generate(
         "do_sample": do_sample,
         "pad_token_id": tokenizer.pad_token_id,
         "eos_token_id": tokenizer.eos_token_id,
+        "logits_processor": LogitsProcessorList([SafeLogitsProcessor()]),
     }
     if do_sample:
         kwargs.update({"temperature": temperature, "top_p": top_p})
@@ -94,8 +144,13 @@ def response_token_logprobs(model, sequences, attention_mask, prompt_width, resp
     )
     logits = outputs.logits[:, prompt_width - 1 : -1, :]
     logits = logits[:, : response_ids.shape[1], :]
-    logp = F.log_softmax(logits.float(), dim=-1)
+    # Safeguards: sanitize non-finite values and clamp logits before log_softmax
+    logits = torch.nan_to_num(logits.float(), nan=-1e4, posinf=1e4, neginf=-1e4)
+    logits = torch.clamp(logits, min=-100.0, max=100.0)
+    logp = logits.log_softmax(dim=-1)
+    logp = torch.nan_to_num(logp, nan=-100.0, posinf=0.0, neginf=-100.0)
     chosen = torch.gather(logp, -1, response_ids.unsqueeze(-1)).squeeze(-1)
+    chosen = torch.nan_to_num(chosen, nan=-100.0, posinf=0.0, neginf=-100.0)
     return chosen, logits
 
 
@@ -109,8 +164,13 @@ def response_sequence_logprobs(model, batch: dict):
     logits = outputs.logits[:, :-1, :]
     labels = batch["input_ids"][:, 1:]
     mask = batch["response_mask"][:, 1:]
-    logp = F.log_softmax(logits.float(), dim=-1)
+    # Safeguards: sanitize non-finite values and clamp logits before log_softmax
+    logits = torch.nan_to_num(logits.float(), nan=-1e4, posinf=1e4, neginf=-1e4)
+    logits = torch.clamp(logits, min=-100.0, max=100.0)
+    logp = logits.log_softmax(dim=-1)
+    logp = torch.nan_to_num(logp, nan=-100.0, posinf=0.0, neginf=-100.0)
     tok = torch.gather(logp, -1, labels.unsqueeze(-1)).squeeze(-1)
+    tok = torch.nan_to_num(tok, nan=-100.0, posinf=0.0, neginf=-100.0)
     return (tok * mask).sum(-1), tok, mask
 
 

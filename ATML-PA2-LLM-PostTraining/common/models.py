@@ -186,6 +186,12 @@ def load_value_model(cfg: dict, checkpoint: str, train_mode: str = "lora_head"):
     else:
         raise ValueError(f"Unknown value train_mode={train_mode!r}")
 
+    # Verify and safeguard value head parameters
+    for name, p in model.named_parameters():
+        if ("score" in name or "classifier" in name):
+            if not torch.all(torch.isfinite(p)):
+                torch.nn.init.normal_(p, mean=0.0, std=0.02)
+
     if torch.cuda.is_available():
         model = model.cuda()
     elif torch.backends.mps.is_available():
@@ -235,7 +241,9 @@ def token_values(value_model, input_ids, attention_mask):
         head = value_model.classifier
     else:
         raise RuntimeError("Could not locate scalar value head")
-    return head(hidden).squeeze(-1)
+    values = head(hidden).squeeze(-1)
+    values = torch.nan_to_num(values.float(), nan=0.0, posinf=1e4, neginf=-1e4)
+    return values
 
 
 def trainable_parameters(model):
