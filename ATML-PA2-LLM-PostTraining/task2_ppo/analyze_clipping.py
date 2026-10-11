@@ -40,7 +40,7 @@ import numpy as np
 import pandas as pd
 import torch
 
-from common.data import load_yaml, prompt_messages, repo_path
+from common.data import load_yaml, prompt_messages, read_jsonl, repo_path
 from common.generation import response_token_logprobs, score_reward_pairs
 from common.metrics import masked_mean
 from common.models import (
@@ -153,6 +153,17 @@ def analyze_cached_clipping(
 
         old_logp_list, new_logp_list, adv_list, mask_list = [], [], [], []
 
+        # Build prompt lookup from RL prompt pools so we can recover the original messages
+        prompt_lookup: dict[str | int, dict] = {}
+        for pool_key in ("rl_prompt_eval", "rl_prompt_train"):
+            pool_path = cfg.get("paths", {}).get(pool_key)
+            if pool_path and repo_path(pool_path).exists():
+                for p_row in read_jsonl(pool_path):
+                    if "prompt_id" in p_row:
+                        prompt_lookup[p_row["prompt_id"]] = p_row
+                    if "source_index" in p_row:
+                        prompt_lookup[p_row["source_index"]] = p_row
+
         for r in rows:
             old_lp = r["old_logprobs"].to(device)
             ref_lp = r["ref_logprobs"].to(device)
@@ -162,9 +173,14 @@ def analyze_cached_clipping(
                 ref_lp = ref_lp.unsqueeze(0)
 
             # 1. Fetch the real prompt and response
-            prompt_idx = r.get("source_index", 0)
             resp = str(r.get("response", ""))
-            msgs = prompt_messages(prompt_idx)
+            pid = r.get("prompt_id")
+            sidx = r.get("source_index")
+            matched_prompt_row = prompt_lookup.get(pid) or prompt_lookup.get(sidx) or r
+            if isinstance(matched_prompt_row, dict) and ("messages" in matched_prompt_row or "prompt" in matched_prompt_row):
+                msgs = prompt_messages(matched_prompt_row)
+            else:
+                msgs = [{"role": "user", "content": f"Prompt {sidx if sidx is not None else pid}"}]
 
             # 2. Compute the ACTUAL new_logprobs using the midpoint policy
             with torch.no_grad():
